@@ -1,3 +1,5 @@
+Option Explicit
+
 Function RoundToList(value As Double) As Double
     Dim hours As Integer
     Dim minutes As Double
@@ -25,6 +27,11 @@ Function RoundToList(value As Double) As Double
 
     RoundToList = hours + result
 End Function
+Sub Commit()
+    Dim today As Date
+    today = Date
+    SaveTimesheetAndSummary today
+End Sub
 Sub SaveTimesheetAndSummary(Optional saveDate As Date)
     Dim ws As Worksheet
     Dim wsTimesheet As Worksheet
@@ -82,6 +89,7 @@ Sub SaveTimesheetAndSummary(Optional saveDate As Date)
 
     today = Format(saveDate, "yyyy-mm-dd")
     savePath = Application.DefaultFilePath & "\Timesheets\" & today & ".xlsx"
+    
     wbNew.SaveAs Filename:=savePath, fileFormat:=xlOpenXMLWorkbook
     wbNew.Close
     
