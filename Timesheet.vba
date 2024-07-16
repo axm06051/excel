@@ -172,6 +172,8 @@ Sub GenerateSummary()
     Dim cat As Variant
     Dim com As Variant
     Dim cas As Variant
+    Dim lunchBreakDetails As Object
+    Dim categoryTotals As Object
     
     Set ws = ThisWorkbook.Sheets("Timesheet")
     lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).row
@@ -206,19 +208,43 @@ Sub GenerateSummary()
     totalSum = 0
     lunchBreakSum = 0
     eodSum = 0
+    Set lunchBreakDetails = CreateObject("Scripting.Dictionary")
+    Set categoryTotals = CreateObject("Scripting.Dictionary")
+    
     For Each cell In ws.Range("F2:F" & lastRow)
         If Len(cell.Offset(0, -2).value) > 0 Then
-            If InStr(1, cell.Offset(0, -3).value, "Lunch/Break", vbTextCompare) = 0 And _
-               InStr(1, cell.Offset(0, -3).value, "EOD", vbTextCompare) = 0 Then
-                totalSum = totalSum + cell.value
-            ElseIf InStr(1, cell.Offset(0, -3).value, "Lunch/Break", vbTextCompare) > 0 Then
-                lunchBreakSum = lunchBreakSum + cell.value
-            ElseIf InStr(1, cell.Offset(0, -3).value, "EOD", vbTextCompare) > 0 Then
-                eodSum = eodSum + cell.value
+            Dim roundedValue As Double
+            roundedValue = RoundToList(cell.value)
+            
+            If cell.Offset(0, -3).value <> "Lunch/Break" And _
+               cell.Offset(0, -3).value <> "EOD" Then
+                totalSum = totalSum + roundedValue
+                If Not categoryTotals.Exists(cell.Offset(0, -3).value) Then
+                    categoryTotals.Add cell.Offset(0, -3).value, roundedValue
+                Else
+                    categoryTotals(cell.Offset(0, -3).value) = categoryTotals(cell.Offset(0, -3).value) + roundedValue
+                End If
+            ElseIf cell.Offset(0, -3).value = "Lunch/Break" Then
+                lunchBreakSum = lunchBreakSum + roundedValue
+                Dim comment As String
+                comment = Trim(cell.Offset(0, -2).value)
+                If Not lunchBreakDetails.Exists(comment) Then
+                    lunchBreakDetails.Add comment, roundedValue
+                Else
+                    lunchBreakDetails(comment) = lunchBreakDetails(comment) + roundedValue
+                End If
+            ElseIf cell.Offset(0, -3).value = "EOD" Then
+                eodSum = eodSum + roundedValue
             End If
         End If
     Next cell
-    wsSummary.Cells(summaryRow, 1).value = "Overall Total"
+    
+    ' Subtract Lunch/Break from totalSum
+    totalSum = totalSum - lunchBreakSum
+    ' Adjust lunchBreakSum to appear as negative in the summary
+    lunchBreakSum = -lunchBreakSum
+    
+    wsSummary.Cells(summaryRow, 1).value = "Overall Total (excluding Lunch/Break)"
     wsSummary.Cells(summaryRow, 2).value = totalSum
     summaryRow = summaryRow + 1
     
@@ -236,31 +262,24 @@ Sub GenerateSummary()
     
     For Each cat In categories
         If cat <> "Lunch/Break" And cat <> "EOD" Then
-            catSum = 0
-            For Each cell In ws.Range("F2:F" & lastRow)
-                If cell.Offset(0, -3).value = cat And _
-                   Len(cell.Offset(0, -2).value) > 0 Then
-                    catSum = catSum + cell.value
-                End If
-            Next cell
             wsSummary.Cells(summaryRow, 1).value = cat
-            wsSummary.Cells(summaryRow, 2).value = catSum
+            wsSummary.Cells(summaryRow, 2).value = categoryTotals(cat)
             summaryRow = summaryRow + 1
             
             If cat = "Support Work" Then
                 wsSummary.Cells(summaryRow, 3).value = "Breakdown by Case Number"
                 summaryRow = summaryRow + 1
-                Set caseNumbers = New Collection
+                Set cases = New Collection
                 On Error Resume Next
                 For Each cell In summaryRng.Columns(2).Cells
                     If cell.row > 1 And cell.Offset(0, 1).value = cat Then
-                        caseNumbers.Add cell.value, CStr(cell.value)
+                        cases.Add cell.value, CStr(cell.value)
                     End If
                 Next cell
                 On Error GoTo 0
-                For Each cas In caseNumbers
+                For Each cas In cases
                     wsSummary.Cells(summaryRow, 4).value = cas
-                    wsSummary.Cells(summaryRow, 5).value = WorksheetFunction.SumIfs(summaryRng.Columns(6), summaryRng.Columns(3), cat, summaryRng.Columns(2), cas)
+                    wsSummary.Cells(summaryRow, 5).value = RoundToList(WorksheetFunction.SumIfs(summaryRng.Columns(6), summaryRng.Columns(3), cat, summaryRng.Columns(2), cas))
                     summaryRow = summaryRow + 1
                 Next cas
             ElseIf cat = "AMPP Support" Then
@@ -281,24 +300,26 @@ Sub GenerateSummary()
                 On Error GoTo 0
                 
                 ' Process comments
-                For Each com In comments
-                    wsSummary.Cells(summaryRow, 1).value = cat
-                    wsSummary.Cells(summaryRow, 2).value = WorksheetFunction.SumIfs(summaryRng.Columns(6), summaryRng.Columns(3), cat, summaryRng.Columns(4), com)
+                If comments.Count > 0 Then
                     wsSummary.Cells(summaryRow, 3).value = "Breakdown by Comment if Case Number is empty"
-                    wsSummary.Cells(summaryRow, 4).value = com
-                    wsSummary.Cells(summaryRow, 5).value = WorksheetFunction.SumIfs(summaryRng.Columns(6), summaryRng.Columns(3), cat, summaryRng.Columns(4), com, summaryRng.Columns(2), "")
                     summaryRow = summaryRow + 1
-                Next com
+                    For Each com In comments
+                        wsSummary.Cells(summaryRow, 4).value = com
+                        wsSummary.Cells(summaryRow, 5).value = RoundToList(WorksheetFunction.SumIfs(summaryRng.Columns(6), summaryRng.Columns(3), cat, summaryRng.Columns(4), com, summaryRng.Columns(2), ""))
+                        summaryRow = summaryRow + 1
+                    Next com
+                End If
                 
                 ' Process cases
-                For Each cas In cases
-                    wsSummary.Cells(summaryRow, 1).value = cat
-                    wsSummary.Cells(summaryRow, 2).value = WorksheetFunction.SumIfs(summaryRng.Columns(6), summaryRng.Columns(3), cat, summaryRng.Columns(2), cas)
+                If cases.Count > 0 Then
                     wsSummary.Cells(summaryRow, 3).value = "Breakdown by Case Number"
-                    wsSummary.Cells(summaryRow, 4).value = cas
-                    wsSummary.Cells(summaryRow, 5).value = RoundToList(WorksheetFunction.SumIfs(summaryRng.Columns(6), summaryRng.Columns(3), cat, summaryRng.Columns(2), cas))
                     summaryRow = summaryRow + 1
-                Next cas
+                    For Each cas In cases
+                        wsSummary.Cells(summaryRow, 4).value = cas
+                        wsSummary.Cells(summaryRow, 5).value = RoundToList(WorksheetFunction.SumIfs(summaryRng.Columns(6), summaryRng.Columns(3), cat, summaryRng.Columns(2), cas))
+                        summaryRow = summaryRow + 1
+                    Next cas
+                End If
                 
             ElseIf cat = "Internal Admin" Or cat = "Customer Admin" Or cat = "Personal Development" Then
                 ' Handling other categories
@@ -312,10 +333,9 @@ Sub GenerateSummary()
                 Next cell
                 On Error GoTo 0
                 
+                wsSummary.Cells(summaryRow, 3).value = "Breakdown by Comment"
+                summaryRow = summaryRow + 1
                 For Each com In comments
-                    wsSummary.Cells(summaryRow, 1).value = cat
-                    wsSummary.Cells(summaryRow, 2).value = WorksheetFunction.SumIfs(summaryRng.Columns(6), summaryRng.Columns(3), cat, summaryRng.Columns(4), com)
-                    wsSummary.Cells(summaryRow, 3).value = "Breakdown by Comment"
                     wsSummary.Cells(summaryRow, 4).value = com
                     wsSummary.Cells(summaryRow, 5).value = RoundToList(WorksheetFunction.SumIfs(summaryRng.Columns(6), summaryRng.Columns(3), cat, summaryRng.Columns(4), com))
                     summaryRow = summaryRow + 1
@@ -324,10 +344,23 @@ Sub GenerateSummary()
         End If
     Next cat
     
+    ' Lunch/Break section
     wsSummary.Cells(summaryRow, 1).value = "Lunch/Break"
     wsSummary.Cells(summaryRow, 2).value = lunchBreakSum
     summaryRow = summaryRow + 1
     
+    ' Add breakdown for Lunch/Break
+    wsSummary.Cells(summaryRow, 3).value = "Breakdown of Lunch/Break"
+    summaryRow = summaryRow + 1
+    
+    Dim key As Variant
+    For Each key In lunchBreakDetails.Keys
+        wsSummary.Cells(summaryRow, 4).value = key
+        wsSummary.Cells(summaryRow, 5).value = lunchBreakDetails(key)
+        summaryRow = summaryRow + 1
+    Next key
+    
+    ' EOD section
     wsSummary.Cells(summaryRow, 1).value = "EOD"
     wsSummary.Cells(summaryRow, 2).value = eodSum
     summaryRow = summaryRow + 1
@@ -338,6 +371,10 @@ Sub GenerateSummary()
     
     wsSummary.Columns("B:B").NumberFormat = "#,##0.00"
     wsSummary.Columns("E:E").NumberFormat = "#,##0.00"
+    
+    ' Autofit columns
+    wsSummary.Columns("A:E").AutoFit
+    
     wsSummary.Activate
     wsSummary.Cells(1, 1).Select
 End Sub
